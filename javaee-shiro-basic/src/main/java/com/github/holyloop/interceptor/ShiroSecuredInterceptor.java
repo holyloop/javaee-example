@@ -20,7 +20,7 @@ import org.apache.shiro.authz.annotation.RequiresUser;
 import org.apache.shiro.subject.Subject;
 
 /**
- * 所有带 {@link com.yinhe.tboxvepserver.interceptor.ShiroSecured ShiroSecured}
+ * 所有带 {@link com.github.holyloop.interceptor.ShiroSecured ShiroSecured}
  * 注解的类和方法都经过该拦截器进行安全验证
  * 
  * @author holyloop

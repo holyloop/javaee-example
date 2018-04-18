@@ -11,7 +11,7 @@ import javax.interceptor.InterceptorBinding;
 
 /**
  * 该注解可在类及方法上使用, 被注解的元素将经过拦截器
- * {@link com.yinhe.tboxvepserver.interceptor.ShiroSecuredInterceptor ShiroSecuredInterceptor}
+ * {@link com.github.holyloop.interceptor.ShiroSecuredInterceptor ShiroSecuredInterceptor}
  * 
  * @author holyloop
  */
