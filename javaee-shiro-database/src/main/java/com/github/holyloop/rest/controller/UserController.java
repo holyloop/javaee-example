@@ -36,6 +36,9 @@ public class UserController {
             return Response.status(Status.BAD_REQUEST).entity("username or password must not be null").build();
         }
 
+        user.setUsername(StringUtils.trim(user.getUsername()));
+        user.setPassword(StringUtils.trim(user.getPassword()));
+
         try {
             userService.addUser(user);
         } catch (UsernameExistedException e) {

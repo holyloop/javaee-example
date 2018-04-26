@@ -15,7 +15,9 @@ import com.github.holyloop.entity.User;
 import com.github.holyloop.entity.UserRoleRel;
 import com.github.holyloop.exception.UsernameExistedException;
 import com.github.holyloop.repository.UserRepository;
+import com.github.holyloop.secure.shiro.util.CredentialEncrypter;
 import com.github.holyloop.service.UserService;
+import com.github.holyloop.util.TwoTuple;
 
 @Stateless
 public class UserServiceImpl implements UserService {
@@ -24,13 +26,13 @@ public class UserServiceImpl implements UserService {
     private UserRepository userRepository;
 
     @Override
-    public User findOneByUsername(String username) {
+    public User getOneByUsername(String username) {
         if (StringUtils.isEmpty(username)) {
             throw new IllegalArgumentException("username must not be null");
         }
 
         try {
-            return userRepository.findOneByUsername(username);
+            return userRepository.getOneByUsername(username);
         } catch (NoResultException e) {
             return null;
         }
@@ -42,7 +44,7 @@ public class UserServiceImpl implements UserService {
             throw new IllegalArgumentException("username must not be null");
         }
 
-        User user = userRepository.findOneByUsername(username);
+        User user = userRepository.getOneByUsername(username);
         Set<String> roles = new HashSet<>();
         if (user != null && user.getUserRoleRels() != null) {
             for (UserRoleRel rel : user.getUserRoleRels()) {
@@ -59,7 +61,7 @@ public class UserServiceImpl implements UserService {
             throw new IllegalArgumentException("username must not be null");
         }
 
-        User user = userRepository.findOneByUsername(username);
+        User user = userRepository.getOneByUsername(username);
         Set<String> permissions = new HashSet<>();
         if (user != null && user.getUserRoleRels() != null) {
             for (UserRoleRel rel : user.getUserRoleRels()) {
@@ -74,7 +76,25 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void addUser(UserDTO user) throws UsernameExistedException {
-        // TODO
+        if (user == null) {
+            throw new IllegalArgumentException("user must not be null");
+        }
+
+        try {
+            User duplicateUser = userRepository.getOneByUsername(user.getUsername());
+            if (duplicateUser != null) {
+                throw new UsernameExistedException();
+            }
+        } catch (NoResultException e) {}
+
+        TwoTuple<String, String> hashAndSalt = CredentialEncrypter.saltedHash(user.getPassword());
+
+        User entity = new User();
+        entity.setUsername(user.getUsername());
+        entity.setPassword(hashAndSalt.t1);
+        entity.setSalt(hashAndSalt.t2);
+
+        userRepository.save(entity);
     }
 
 }

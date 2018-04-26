@@ -8,7 +8,7 @@ import com.github.holyloop.exception.UsernameExistedException;
 
 public interface UserService {
 
-    User findOneByUsername(String username);
+    User getOneByUsername(String username);
 
     Set<String> listRolesByUsername(String username);
 

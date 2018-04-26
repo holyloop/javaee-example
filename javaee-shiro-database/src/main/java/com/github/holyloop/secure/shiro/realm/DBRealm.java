@@ -54,7 +54,7 @@ public class DBRealm extends AuthorizingRealm {
             throw new AuthenticationException();
         }
 
-        User user = userService.findOneByUsername(username);
+        User user = userService.getOneByUsername(username);
         if (user == null) {
             throw new AuthenticationException();
         }
