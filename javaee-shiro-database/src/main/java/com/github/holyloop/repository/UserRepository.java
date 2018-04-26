@@ -2,8 +2,8 @@ package com.github.holyloop.repository;
 
 import com.github.holyloop.entity.User;
 
-public interface UserRepository {
+public interface UserRepository extends BaseJpaRepository<User> {
 
-    User findOneByUsername(String username);
+    User getOneByUsername(String username);
 
 }

@@ -11,13 +11,13 @@ import org.apache.commons.lang3.StringUtils;
 import com.github.holyloop.entity.User;
 import com.github.holyloop.repository.UserRepository;
 
-public class UserRepositoryImpl extends BaseJpaRepository<User> implements UserRepository {
+public class UserRepositoryImpl extends BaseJpaRepositoryImpl<User> implements UserRepository {
 
     @PersistenceContext
     private EntityManager em;
 
     @Override
-    public User findOneByUsername(String username) {
+    public User getOneByUsername(String username) {
         if (StringUtils.isEmpty(username)) {
             throw new IllegalArgumentException("username must not be null");
         }
