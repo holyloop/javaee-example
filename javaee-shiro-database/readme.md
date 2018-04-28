@@ -123,3 +123,222 @@ securityManager.realms = $dbRealm
 ```
 
 比较之前的配置, 我删掉了 `[users]` 和 `[roles]` 块, 因为这些数据我们将从数据库中加载. 此外, 我配置了Shiro的密码匹配器 `credentialsMatcher` , 它将用sha256来做密码匹配; 然后还有我们这篇文章的重点 `dbRealm` , 这个Realm将由我们自己来实现.
+
+## 实现Realm
+
+我们的 `DBRealm`  将继承[AuthorizingRealm](https://shiro.apache.org/static/1.2.2/apidocs/org/apache/shiro/realm/AuthorizingRealm.html), 然后覆盖它的 `doGetAuthorizationInfo` 和 `doGetAuthenticationInfo` 方法, 这两个方法分别用来获取权限信息和认证信息:
+
+`src/main/java/com/github/holyloop/secure/shiro/realm/DBRealm.java`:
+
+```java
+@Override
+protected AuthorizationInfo doGetAuthorizationInfo(PrincipalCollection principals) {
+
+  String username = StringUtils.trim((String) principals.getPrimaryPrincipal());
+
+  Set<String> roles = userService.listRolesByUsername(username);
+  Set<String> permissions = userService.listPermissionsByUsername(username);
+
+  SimpleAuthorizationInfo authorizationInfo = new SimpleAuthorizationInfo();
+  authorizationInfo.setRoles(roles);
+  authorizationInfo.setStringPermissions(permissions);
+
+  return authorizationInfo;
+}
+
+@Override
+protected AuthenticationInfo doGetAuthenticationInfo(AuthenticationToken token) throws AuthenticationException {
+
+  String username = StringUtils.trim((String) token.getPrincipal());
+  if (StringUtils.isEmpty(username)) {
+    throw new AuthenticationException();
+  }
+
+  User user = userService.getOneByUsername(username);
+  if (user == null) {
+    throw new AuthenticationException();
+  }
+  SimpleAuthenticationInfo authenticationInfo = new SimpleAuthenticationInfo(
+    username,
+    user.getPassword(),
+    new SimpleByteSource(Base64.decode(user.getSalt())),
+    getName());
+
+  return authenticationInfo;
+}
+```
+
+`doGetAuthorizationInfo` 将加载用户的角色和权限数据, `doGetAuthenticationInfo` 根据用户输入的口令查找对应用户的认证数据(密文密码+盐).
+
+此外, 这两个方法都用到了 `UserService` , 它的实现比较简单, 如 `getOneByUsername` :
+
+```java
+public User getOneByUsername(String username) {
+  if (StringUtils.isEmpty(username)) {
+    throw new IllegalArgumentException("username must not be null");
+  }
+
+  try {
+    return userRepository.getOneByUsername(username);
+  } catch (NoResultException e) {
+    return null;
+  }
+}
+```
+
+`UserService` 则依赖 `UserRepository` , 它是基于JPA的数据库访问接口, 具体的实现细节可以参考我的[Github](https://github.com/holyloop/javaee-example/tree/master/javaee-shiro-database)上的源码.
+
+## 添加用户
+
+到上面为止, 用户认证及鉴权的部分已经基本完成了. 但只有鉴权功能对一个系统来说是不完整的, 我们还需要能添加新的用户. 我们给 `UserService`  添加一个添加新用户的接口:
+
+```java
+public void addUser(UserDTO user) throws UsernameExistedException {
+  if (user == null) {
+    throw new IllegalArgumentException("user must not be null");
+  }
+
+  try {
+    User duplicateUser = userRepository.getOneByUsername(user.getUsername());
+    if (duplicateUser != null) {
+      throw new UsernameExistedException();
+    }
+  } catch (NoResultException e) {}
+
+  TwoTuple<String, String> hashAndSalt = CredentialEncrypter.saltedHash(user.getPassword());
+
+  User entity = new User();
+  entity.setUsername(user.getUsername());
+  entity.setPassword(hashAndSalt.t1);
+  entity.setSalt(hashAndSalt.t2);
+
+  userRepository.save(entity);
+}
+```
+
+`UsernameExistedException` 如该异常名所描述, 当新用户输入的用户名与已有的用户重复时抛出该异常. `UserDTO` 结构如下:
+
+`src/main/java/com/github/holyloop/dto/UserDTO.java` :
+
+```java
+private String username;
+private String password;
+```
+
+这里我将它定义得很简单, 实际项目开发时它肯定会有更多的属性, 比如邮箱, 生日, 手机号等等.
+
+此外很重要的一个功能是密码加密, 这里我实现了 `CredentialEncrypter` 这个加密器:
+
+`src/main/java/com/github/holyloop/secure/shiro/util/CredentialEncrypter.java` :
+
+```java
+private static RandomNumberGenerator rng = new SecureRandomNumberGenerator();
+
+/**
+* hash + salt
+* 
+* @param plainTextPassword
+*            明文密码
+* @return
+*/
+public static TwoTuple<String, String> saltedHash(String plainTextPassword) {
+  if (StringUtils.isEmpty(plainTextPassword)) {
+    throw new IllegalArgumentException("plainTextPassword must not be null");
+  }
+
+  Object salt = rng.nextBytes();
+  String hash = new Sha256Hash(plainTextPassword, salt, 1024).toBase64();
+  return new TwoTuple<>(hash, salt.toString());
+}
+```
+
+为了更高的安全性, 我们为每个用户都生成一个随机盐 `RandomNumberGenerator` , `saltedHash` 将明文密码和随机盐Sha256加密然后base64编码. 方法将返回密文密码和随机盐.
+
+到这里, 整个系统的加密和解密功能就算基本完成了, 接下来我们进行一个简单的应用.
+
+## 基本应用
+
+### 添加REST接口
+
+这里我们实现一个添加新用户的接口:
+
+`src/main/java/com/github/holyloop/rest/controller/UserController.java`:
+
+```java
+@RequiresPermissions("user:insert")
+@POST
+@Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
+public Response addUser(UserDTO user) {
+  if (user == null || StringUtils.isEmpty(user.getUsername()) || StringUtils.isEmpty(user.getPassword())) {
+    return Response.status(Status.BAD_REQUEST).entity("username or password must not be null").build();
+  }
+
+  user.setUsername(StringUtils.trim(user.getUsername()));
+  user.setPassword(StringUtils.trim(user.getPassword()));
+
+  try {
+    userService.addUser(user);
+  } catch (UsernameExistedException e) {
+    return Response.status(Status.BAD_REQUEST).entity("username existed").build();
+  }
+
+  return Response.status(Status.OK).build();
+}
+```
+
+我这里以jax-rs的风格实现了这个接口, 实现逻辑很简单: 校验用户输入是否合法, 合法则调用 `UserService.addUser()` 添加该用户, 添加成功时返回200; 需要注意的是我在该接口上添加一个 `@RequiresPermissions("user:insert")` 注解, 这个注解说明接口的调用者需要有 `user-insert` 的权限.
+
+### 部署测试
+
+接下来我们将应用部署并用curl进行几个简单的测试.
+
+- 测试定义的 `@RequiresPermissions("user:insert")` 权限要求:
+
+```shell
+curl -i -d "username=guest&password=guest" -c cookies "localhost:8080/shiro-db/login"
+curl -i -X POST -H "content-type:application/json" -b cookies \
+> -d '{"username":"newuser", "password":"123"}' \
+> localhost:8080/shiro-db/api/user
+```
+
+这里我以guest用户登录, 该用户没有 "user:insert" 的权限, 可以看到请求添加用户接口响应为403, :
+
+![](image/guest-add-user.png)
+
+然后换一个拥有 "user:insert" 权限的用户登录:
+
+```shell
+curl -i -d "username=root&password=secret" -c cookies "localhost:8080/shiro-db/login"
+curl -i -X POST -H "content-type:application/json" -b cookies \
+> -d '{"username":"newuser", "password":"123"}' \
+> localhost:8080/shiro-db/api/user
+```
+
+![](image/root-add-user.png)
+
+可以看到响应为200, 然后我们去数据库中看一下有没有新添加的 "newuser" 用户:
+
+![](image/db-after-add-user.png)
+
+可以看到用户添加成功, 并且密码为密文存储
+
+- 测试新用户登录
+
+```shell
+curl -i -d "username=newuser&password=123" -c cookies "localhost:8080/shiro-db/login"
+```
+
+![](image/newuser-login.png)
+
+登录成功.
+
+- 重复添加该新用户
+
+我们在添加用户的逻辑里面定义了如果用户名重复, 则新用户应添加失败:
+
+![](image/root-add-again.png)
+
+如我们所期望的, 服务器响应为400并提示我们"username existed".
+
+以上就是Shiro基于数据库的用户,角色,权限配置的方法, 核心的地方在于Realm的配置, Realm负责获取用户的认证和鉴权信息; 为了提高认证信息的存储安全性, 我们还进行了密码的加密处理(对于一个完备的系统来说这必不可少); 对于规模稍大的系统来说, 纯基于数据库的认证/鉴权机制是不够的, 为了提高效率还需要添加一些缓存机制, 这篇文章暂时说到这里, 关于缓存, 我们后面再聊.
