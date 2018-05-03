@@ -1,4 +1,4 @@
-package com.github.holyloop.article.trending.config;
+package com.github.holyloop.article.trending;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
